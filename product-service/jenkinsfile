@@ -1,0 +1,72 @@
+pipeline {
+    agent {
+        docker {
+            image 'maven:3.8.4-openjdk-17'   // Build & test Java
+            args '-v /var/run/docker.sock:/var/run/docker.sock'  // Allow docker inside container
+        }
+    }
+
+    environment {
+        DOCKER_HUB_CREDENTIALS = credentials('dockerhub-creds')
+        DOCKER_HUB_USERNAME = "${DOCKER_HUB_CREDENTIALS_USR}"
+        DOCKER_HUB_PASSWORD = "${DOCKER_HUB_CREDENTIALS_PSW}"
+        IMAGE_TAG = "${BUILD_NUMBER}"
+    }
+
+    stages {
+        stage('Checkout Code') {
+            steps {
+                // Checkout whole repo so product-service folder is available
+                git branch: 'main', url: 'https://github.com/akhileeesh/java-ci-cd.git'
+            }
+        }
+
+        stage('Build Product Service') {
+            steps {
+                sh '''
+                cd product-service
+                mvn clean package -DskipTests
+                '''
+            }
+        }
+
+        stage('Build Docker Image') {
+            steps {
+                sh '''
+                docker build -t ${DOCKER_HUB_USERNAME}/product-service:${IMAGE_TAG} product-service/
+                '''
+            }
+        }
+
+        stage('Push Docker Image') {
+            steps {
+                sh '''
+                echo $DOCKER_HUB_PASSWORD | docker login -u $DOCKER_HUB_USERNAME --password-stdin
+                docker push ${DOCKER_HUB_USERNAME}/product-service:${IMAGE_TAG}
+                docker logout
+                '''
+            }
+        }
+
+        stage('Deploy with Docker Compose') {
+            steps {
+                sh '''
+                docker-compose down
+                docker-compose up -d
+                '''
+            }
+        }
+    }
+
+    post {
+        always {
+            echo "Pipeline finished for Product Service"
+        }
+        success {
+            echo "✅ Product Service build, image push & deploy successful!"
+        }
+        failure {
+            echo "❌ Product Service pipeline failed!"
+        }
+    }
+}
